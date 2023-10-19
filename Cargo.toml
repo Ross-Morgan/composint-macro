@@ -3,9 +3,10 @@ name = "composint-macro"
 version = "0.1.0"
 edition = "2021"
 
+documentation = "https://docs.rs/composint-macro"
 description = "Space efficient structs using otherwise useless bits"
 license = "MIT"
-repository = ""
+repository = "https://github.com/Ross-Morgan/composint-macro"
 
 [lib]
 proc-macro = true

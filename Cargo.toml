@@ -1,0 +1,16 @@
+[package]
+name = "composint-macro"
+version = "0.1.0"
+edition = "2021"
+
+description = "Space efficient structs using otherwise useless bits"
+license = "MIT"
+repository = ""
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0.69"
+quote = "1.0.33"
+syn = { version = "2.0.38", features = ["parsing"] }

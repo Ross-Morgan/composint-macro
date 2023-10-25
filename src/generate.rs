@@ -5,46 +5,47 @@ use super::data::Data;
 
 pub(crate) fn generate_struct_definition(data: &Data) -> TokenStream {
     let name = &data.type_name;
-    let block_count = calc_size::<usize>(data);
+    let block_count = data.field_sizes().iter().sum::<usize>();
+    let block_count = match block_count % 8 {
+        0 => block_count / 8,
+        _ => block_count / 8 + 1,
+    };
 
     quote! {
-        struct #name([usize; #block_count]);
+        #[repr(transparent)]
+        #[derive(Copy, Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
+        struct #name([u8; #block_count]);
     }
 }
 
 pub(crate) fn generate_struct_impl(data: &Data) -> TokenStream {
     let type_name = &data.type_name;
-    
+
+    let type_name_literal = type_name.to_string();
+
+    let new_fn = generate_new_body(&data);
     let field_body = generate_impl_body(&data);
 
+    let field_name = data.field_names();
+    let field_name_literal = data.field_names().into_iter().map(|i| i.to_string());
+
     quote! {
+        #[allow(unused_variables)]
         impl #type_name {
+            #new_fn
             #(#field_body)*
+        }
+
+        impl std::fmt::Debug for #type_name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+                f.debug_struct(#type_name_literal)
+                 #(.field(#field_name_literal, &self.#field_name()))*
+                 .finish()
+            }
         }
     }
 }
 
-fn calc_size<T>(data: &Data) -> usize {
-    let total_size = data.fields
-        .pairs()
-        .map(|p| p.value().bits.base10_parse::<usize>())
-        .map(|lit| lit.unwrap_or(0))
-        .sum::<usize>();
-
-    let total_size = match total_size % 8 {
-        0 => total_size / 8,
-        _ => total_size / 8 + 1,
-    };
-
-    let ptr_size = std::mem::size_of::<T>();
-    let blocks = (total_size / ptr_size).min(1);
-    let rem = total_size.checked_rem(blocks * ptr_size).unwrap_or(1);
-
-    match rem {
-        0 => blocks,
-        _ => blocks + 1,
-    }
-} 
 
 fn generate_impl_body(data: &Data) -> Vec<TokenStream> {
     let mut streams = Vec::<TokenStream>::with_capacity(data.field_count());
@@ -64,28 +65,28 @@ fn generate_impl_body(data: &Data) -> Vec<TokenStream> {
     for (name, ty, &offset, &size) in i {
         let stream = quote! {
             pub fn #name(&self) -> #ty {
-                let size_ratio = std::mem::size_of::<#ty>();
-                let ptr = unsafe {
-                    self.0
-                        .as_slice()
-                        .as_ptr()
-                        .cast::<u8>()
-                        .add(#offset / 8)
+                let ptr = &self.0[0] as *const u8;
+
+                let mut output: #ty = 0;
+                
+                let bytes = match #size % 8 {
+                    0 => #size / 8,
+                    _ => #size / 8 + 1,
                 };
 
-                let mut output = 0;
+                let mut cursor = #offset;
 
-                let bytes_to_traverse = #size / 8;
-
-                for i in 0..=bytes_to_traverse {
-                    let data = unsafe { *ptr.add(i) };
-
-                    for n in 0..8 {
-                        output += ((data >> n) & 1) << (bytes_to_traverse - i + n);
+                while (cursor - #offset + 1) <= #size {
+                    let bit_cursor = cursor - #offset + 1;
+                    unsafe {
+                        let current_byte_ptr = ptr.add(cursor / 8);
+                        output |= ((((*current_byte_ptr) >> (7 - cursor % 8)) & 1) << (#size - bit_cursor)) as #ty;
                     }
+
+                    cursor += 1;
                 }
 
-                output as #ty
+                output
             }
         };
 
@@ -93,4 +94,46 @@ fn generate_impl_body(data: &Data) -> Vec<TokenStream> {
     }
 
     streams
+}
+
+fn generate_new_body(data: &Data) -> TokenStream {
+    let field_name = data.field_names();
+    let field_type = data.field_types();
+    let field_size = data.field_sizes();
+
+    let total_size: usize = field_size.iter().sum();
+    let total_size = match total_size % 8 {
+        0 => total_size / 8,
+        _ => total_size / 8 + 1,
+    };
+
+    let offset = data.field_cumulative_offsets();
+
+    quote! {
+        pub fn new(#(#field_name: #field_type),*) -> Self {
+            let mut inner = [0u8; #total_size];
+
+            let mut bit_cursor = 0;
+        
+            let start_ptr = &mut inner[0] as *mut u8;
+
+            #(
+                let field_size = #field_size;
+
+                while let bit_pos @ (1..=#field_size) = (bit_cursor - #offset + 1) {
+                    let current_byte_ptr = unsafe { start_ptr.add((bit_pos - 1) / 8) };
+
+                    unsafe { *(&mut *current_byte_ptr) |= (1 << 7 - ((bit_pos - 1) % 8)) };
+
+                    bit_cursor += 1;
+                }
+            )*
+
+            Self(inner)
+        }
+
+        pub const fn new_zeroed() -> Self {
+            Self([0u8; #total_size])
+        }
+    }
 }

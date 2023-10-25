@@ -3,7 +3,6 @@ extern crate proc_macro;
 mod data;
 mod field;
 mod generate;
-mod sign;
 
 use proc_macro::TokenStream;
 use quote::quote;

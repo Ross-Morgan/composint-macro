@@ -3,8 +3,6 @@ use syn::{token, Ident, braced, Token};
 use syn::parse::{Parse, ParseStream, Result};
 use syn::punctuated::Punctuated;
 
-use crate::sign::Sign;
-
 use super::field::Field;
 
 pub(crate) struct Data {
@@ -40,6 +38,7 @@ impl Data {
             .collect()
     }
 
+    /// Size of each field in bits
     pub fn field_sizes(&self) -> Vec<usize> {
         self
             .fields
@@ -53,9 +52,7 @@ impl Data {
             .fields
             .pairs()
             .map(|p| {
-                let size = p.value().bits.base10_parse().unwrap_or(32usize);
-                let sign = p.value().sign;
-                (size, sign)
+                p.value().bits.base10_parse().unwrap_or(32usize)
             })
             .map(smallest_fitting_type)
             .collect()
@@ -65,8 +62,8 @@ impl Data {
         self
             .fields
             .pairs()
-            .map(|p| p.value().bits.base10_parse::<usize>().unwrap())
-            .scan(0usize, |state, x| {
+            .map(|p| p.value().bits.base10_parse().unwrap())
+            .scan(0usize, |state: &mut usize, x: usize| {
                 *state += x;
                 Some(*state - x)
             })
@@ -75,6 +72,6 @@ impl Data {
 }
 
 
-fn smallest_fitting_type((bits, sign): (usize, Sign)) -> Ident {
-    format_ident!("{}{}", sign.to_char(), bits.next_power_of_two())
+fn smallest_fitting_type(bits: usize) -> Ident {
+    format_ident!("u{}", bits.next_power_of_two())
 }
